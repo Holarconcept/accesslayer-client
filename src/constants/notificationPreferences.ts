@@ -4,33 +4,26 @@ export const NOTIFICATION_PREFERENCE_COPY: Record<
 	NotificationPreferenceType,
 	{ label: string; description: string }
 > = {
-	price_alert: {
-		label: 'Price alert triggered',
-		description: 'A key you set an alert on crosses your target price.',
+	settlement: {
+		label: 'Settlement',
+		description: 'Receive an alert when an on-chain settlement completes.',
 	},
-	milestone_reached: {
-		label: 'Milestone reached',
-		description: 'A creator you hold hits a bonding curve milestone.',
+	kyc_expiry: {
+		label: 'KYC expiry',
+		description:
+			'Get notified when your KYC verification is approaching expiry.',
 	},
-	vesting_cliff: {
-		label: 'Vesting cliff',
-		description: 'A vesting cliff on your keys is about to unlock.',
+	watchlist_change: {
+		label: 'Watchlist change',
+		description: 'Receive alerts when an item on your watchlist changes.',
 	},
-	staking_reward: {
-		label: 'Staking reward',
-		description: 'New staking rewards are ready to claim.',
+	auto_invest: {
+		label: 'Auto-invest',
+		description: 'Get notified when an automatic investment is executed.',
 	},
-	governance_vote: {
-		label: 'Governance vote',
-		description: 'A vote opens or closes for a creator you hold.',
-	},
-	referral_earned: {
-		label: 'Referral earned',
-		description: 'Someone you referred makes their first trade.',
-	},
-	key_deprecated: {
-		label: 'Key deprecated',
-		description: 'A creator key you hold is deprecated or migrated.',
+	maturity_approaching: {
+		label: 'Maturity approaching',
+		description: 'Receive an alert when an investment is nearing maturity.',
 	},
 };
 
