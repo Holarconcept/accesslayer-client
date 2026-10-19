@@ -1,142 +1,113 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { Signer } from '@/lib/signing/types';
 import {
-	NOTIFICATION_CHANNELS,
 	NOTIFICATION_PREFERENCE_TYPES,
 	notificationPreferencesService,
-	type NotificationChannel,
 	type NotificationPreferences,
 	type NotificationPreferenceType,
 } from '@/services/notificationPreferences.service';
 
-/**
- * Channel defaults used when the API omits a notification type (e.g. a
- * type added on the client before the backend knows about it). In-app is
- * on so users still see the event; email stays opt-in.
- */
-const DEFAULT_CHANNEL_PREFERENCES = { email: false, inApp: true } as const;
+export function getDefaultNotificationPreferences(): NotificationPreferences {
+	return {
+		settlement: true,
+		kyc_expiry: true,
+		watchlist_change: true,
+		auto_invest: true,
+		maturity_approaching: true,
+	};
+}
 
-/**
- * Fills any notification types or channels missing from the API payload so
- * every row always renders with a defined boolean state.
- */
 export function normalizeNotificationPreferences(
-	raw:
-		| Partial<Record<string, Partial<Record<string, unknown>>>>
-		| null
-		| undefined
+	raw: Partial<Record<NotificationPreferenceType, unknown>> | null | undefined
 ): NotificationPreferences {
-	const result = {} as NotificationPreferences;
+	const defaults = getDefaultNotificationPreferences();
+	const normalized = { ...defaults };
+
 	for (const type of NOTIFICATION_PREFERENCE_TYPES) {
-		const source = raw?.[type] ?? {};
-		result[type] = {
-			email:
-				typeof source.email === 'boolean'
-					? source.email
-					: DEFAULT_CHANNEL_PREFERENCES.email,
-			inApp:
-				typeof source.inApp === 'boolean'
-					? source.inApp
-					: DEFAULT_CHANNEL_PREFERENCES.inApp,
-		};
+		if (typeof raw?.[type] === 'boolean') {
+			normalized[type] = raw[type];
+		}
 	}
-	return result;
+
+	return normalized;
 }
 
-export function areAllNotificationsEnabled(
-	preferences: NotificationPreferences
-): boolean {
-	return NOTIFICATION_PREFERENCE_TYPES.every(type =>
-		NOTIFICATION_CHANNELS.every(channel => preferences[type][channel])
-	);
-}
-
-export function setAllNotificationPreferences(
-	enabled: boolean
-): NotificationPreferences {
-	const result = {} as NotificationPreferences;
-	for (const type of NOTIFICATION_PREFERENCE_TYPES) {
-		result[type] = { email: enabled, inApp: enabled };
-	}
-	return result;
-}
-
-export type PreferencesLoadStatus = 'loading' | 'ready' | 'error';
+export type PreferencesLoadStatus =
+	'loading' | 'ready' | 'error' | 'disconnected';
 export type PreferencesSaveStatus = 'idle' | 'saving' | 'error';
 
 export interface UseNotificationPreferencesOptions {
-	/** Injectable for tests; defaults to the API service. */
-	fetchPreferences?: () => Promise<NotificationPreferences>;
-	/** Injectable for tests; defaults to the API service. */
+	address?: string;
+	signer: Signer | null;
+	fetchPreferences?: (
+		address: string
+	) => Promise<NotificationPreferences | null | undefined>;
 	updatePreferences?: (
-		preferences: NotificationPreferences
-	) => Promise<NotificationPreferences | undefined>;
+		address: string,
+		preferences: NotificationPreferences,
+		signer: Signer
+	) => Promise<void>;
 	onSaveSuccess?: () => void;
 	onSaveError?: (error: unknown) => void;
 }
+
+const fetchPreferencesFromContract = (address: string) =>
+	notificationPreferencesService.getPreferences(address);
+const updatePreferencesOnContract = (
+	address: string,
+	preferences: NotificationPreferences,
+	signer: Signer
+) =>
+	notificationPreferencesService.updatePreferences(
+		address,
+		preferences,
+		signer
+	);
 
 export interface UseNotificationPreferencesResult {
 	preferences: NotificationPreferences | null;
 	loadStatus: PreferencesLoadStatus;
 	saveStatus: PreferencesSaveStatus;
-	allEnabled: boolean;
-	setChannel: (
-		type: NotificationPreferenceType,
-		channel: NotificationChannel,
-		enabled: boolean
-	) => void;
-	setAll: (enabled: boolean) => void;
-	/** Re-sends the last change that failed to save. */
-	retrySave: () => void;
-	/** Re-fetches preferences after a failed initial load. */
+	hasChanges: boolean;
+	setPreference: (type: NotificationPreferenceType, enabled: boolean) => void;
+	save: () => Promise<void>;
 	reload: () => void;
 }
 
-/**
- * Loads the user's notification preferences and saves every change
- * immediately. Changes are applied optimistically; if a save fails the UI
- * rolls back to the last server-confirmed state and the failed change is
- * kept so `retrySave` can re-send it.
- */
 export function useNotificationPreferences({
-	fetchPreferences = () => notificationPreferencesService.getPreferences(),
-	updatePreferences = preferences =>
-		notificationPreferencesService.updatePreferences(preferences),
+	address,
+	signer,
+	fetchPreferences = fetchPreferencesFromContract,
+	updatePreferences = updatePreferencesOnContract,
 	onSaveSuccess,
 	onSaveError,
-}: UseNotificationPreferencesOptions = {}): UseNotificationPreferencesResult {
+}: UseNotificationPreferencesOptions): UseNotificationPreferencesResult {
 	const [preferences, setPreferences] =
 		useState<NotificationPreferences | null>(null);
 	const [loadStatus, setLoadStatus] =
 		useState<PreferencesLoadStatus>('loading');
 	const [saveStatus, setSaveStatus] = useState<PreferencesSaveStatus>('idle');
 	const [reloadToken, setReloadToken] = useState(0);
-
-	const confirmedRef = useRef<NotificationPreferences | null>(null);
-	const failedRef = useRef<NotificationPreferences | null>(null);
-	const latestRequestRef = useRef(0);
-
-	// Keep the latest callbacks without re-running the load effect.
-	const fetchRef = useRef(fetchPreferences);
-	const updateRef = useRef(updatePreferences);
-	const onSaveSuccessRef = useRef(onSaveSuccess);
-	const onSaveErrorRef = useRef(onSaveError);
-	useEffect(() => {
-		fetchRef.current = fetchPreferences;
-		updateRef.current = updatePreferences;
-		onSaveSuccessRef.current = onSaveSuccess;
-		onSaveErrorRef.current = onSaveError;
-	});
+	const savedPreferences = useRef<NotificationPreferences | null>(null);
 
 	useEffect(() => {
+		if (!address) {
+			setPreferences(null);
+			savedPreferences.current = null;
+			setLoadStatus('disconnected');
+			return;
+		}
+
 		let cancelled = false;
+		setPreferences(null);
 		setLoadStatus('loading');
+		setSaveStatus('idle');
 
-		fetchRef
-			.current()
+		fetchPreferences(address)
 			.then(data => {
 				if (cancelled) return;
 				const normalized = normalizeNotificationPreferences(data);
-				confirmedRef.current = normalized;
+				savedPreferences.current = normalized;
 				setPreferences(normalized);
 				setLoadStatus('ready');
 			})
@@ -148,73 +119,56 @@ export function useNotificationPreferences({
 		return () => {
 			cancelled = true;
 		};
-	}, [reloadToken]);
+	}, [address, fetchPreferences, reloadToken]);
 
-	const save = useCallback((next: NotificationPreferences) => {
-		const requestId = ++latestRequestRef.current;
-		setPreferences(next);
+	const setPreference = useCallback(
+		(type: NotificationPreferenceType, enabled: boolean) => {
+			setPreferences(current =>
+				current ? { ...current, [type]: enabled } : current
+			);
+			setSaveStatus('idle');
+		},
+		[]
+	);
+
+	const save = useCallback(async () => {
+		if (!address || !signer || !preferences || saveStatus === 'saving')
+			return;
+
 		setSaveStatus('saving');
+		try {
+			await updatePreferences(address, preferences, signer);
+			savedPreferences.current = preferences;
+			setSaveStatus('idle');
+			onSaveSuccess?.();
+		} catch (error) {
+			setSaveStatus('error');
+			onSaveError?.(error);
+		}
+	}, [
+		address,
+		onSaveError,
+		onSaveSuccess,
+		preferences,
+		saveStatus,
+		signer,
+		updatePreferences,
+	]);
 
-		updateRef
-			.current(next)
-			.then(saved => {
-				const confirmed = saved
-					? normalizeNotificationPreferences(saved)
-					: next;
-				confirmedRef.current = confirmed;
-				// A newer change is already in flight; let it own the UI.
-				if (requestId !== latestRequestRef.current) return;
-				failedRef.current = null;
-				setPreferences(confirmed);
-				setSaveStatus('idle');
-				onSaveSuccessRef.current?.();
-			})
-			.catch(error => {
-				if (requestId !== latestRequestRef.current) return;
-				failedRef.current = next;
-				setPreferences(confirmedRef.current);
-				setSaveStatus('error');
-				onSaveErrorRef.current?.(error);
-			});
-	}, []);
-
-	const setChannel = useCallback(
-		(
-			type: NotificationPreferenceType,
-			channel: NotificationChannel,
-			enabled: boolean
-		) => {
-			if (!preferences) return;
-			save({
-				...preferences,
-				[type]: { ...preferences[type], [channel]: enabled },
-			});
-		},
-		[preferences, save]
-	);
-
-	const setAll = useCallback(
-		(enabled: boolean) => {
-			if (!preferences) return;
-			save(setAllNotificationPreferences(enabled));
-		},
-		[preferences, save]
-	);
-
-	const retrySave = useCallback(() => {
-		if (failedRef.current) save(failedRef.current);
-	}, [save]);
-
-	const reload = useCallback(() => setReloadToken(token => token + 1), []);
+	const hasChanges =
+		preferences !== null &&
+		(savedPreferences.current === null ||
+			NOTIFICATION_PREFERENCE_TYPES.some(
+				type => preferences[type] !== savedPreferences.current?.[type]
+			));
 
 	return {
 		preferences,
 		loadStatus,
 		saveStatus,
-		allEnabled: preferences ? areAllNotificationsEnabled(preferences) : false,
-		setChannel,
-		setAll,
-		retrySave,
-		reload,
+		hasChanges,
+		setPreference,
+		save,
+		reload: () => setReloadToken(token => token + 1),
 	};
 }

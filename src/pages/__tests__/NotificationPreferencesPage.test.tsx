@@ -11,7 +11,8 @@ import {
 	NOTIFICATION_PREFERENCE_TYPES,
 	type NotificationPreferences,
 } from '@/services/notificationPreferences.service';
-import { setAllNotificationPreferences } from '@/hooks/useNotificationPreferences';
+import { getDefaultNotificationPreferences } from '@/hooks/useNotificationPreferences';
+import type { Signer } from '@/lib/signing/types';
 
 const { toastSuccess, toastError } = vi.hoisted(() => ({
 	toastSuccess: vi.fn(),
@@ -22,21 +23,30 @@ vi.mock('@/utils/toast.util', () => ({
 	default: { success: toastSuccess, error: toastError },
 }));
 
-function makePreferences(): NotificationPreferences {
-	return {
-		...setAllNotificationPreferences(false),
-		price_alert: { email: true, inApp: true },
-		staking_reward: { email: false, inApp: true },
-	};
-}
+vi.mock('@/hooks/useStellarWallet', () => ({
+	useStellarWallet: () => ({
+		address: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
+		activeSigner: { type: 'software', sign: vi.fn(), getPublicKey: vi.fn() },
+		isConnected: true,
+		loading: false,
+	}),
+}));
 
 function getSwitch(name: string) {
 	return screen.getByRole('switch', { name });
 }
 
 function renderPage(
-	fetchPreferences = vi.fn(async () => makePreferences()),
-	updatePreferences = vi.fn(async (next: NotificationPreferences) => next)
+	fetchPreferences = vi.fn<
+		(address: string) => Promise<NotificationPreferences | null | undefined>
+	>(async () => getDefaultNotificationPreferences()),
+	updatePreferences = vi.fn<
+		(
+			_address: string,
+			_preferences: NotificationPreferences,
+			_signer: Signer
+		) => Promise<void>
+	>(async () => {})
 ) {
 	render(
 		<MemoryRouter>
@@ -49,173 +59,100 @@ function renderPage(
 	return { fetchPreferences, updatePreferences };
 }
 
-// Multi-step render flows; allow headroom on loaded CI runners.
-describe('NotificationPreferencesPage', { timeout: 15_000 }, () => {
+describe('NotificationPreferencesPage', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 	});
 
-	it('renders every notification type with the state returned by the API', async () => {
-		renderPage();
+	it('loads each on-chain alert toggle with the saved preference', async () => {
+		const preferences = {
+			...getDefaultNotificationPreferences(),
+			settlement: false,
+			auto_invest: false,
+		};
+		const { fetchPreferences } = renderPage(vi.fn(async () => preferences));
 
-		await screen.findByText('Price alert triggered');
-
+		await screen.findByText('Settlement');
+		expect(fetchPreferences).toHaveBeenCalledWith(
+			'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF'
+		);
 		for (const type of NOTIFICATION_PREFERENCE_TYPES) {
 			expect(
 				screen.getByText(NOTIFICATION_PREFERENCE_COPY[type].label)
 			).toBeInTheDocument();
+			expect(
+				getSwitch(NOTIFICATION_PREFERENCE_COPY[type].label)
+			).toHaveAttribute('aria-checked', String(preferences[type]));
 		}
-
-		expect(
-			getSwitch('Price alert triggered email notifications')
-		).toHaveAttribute('aria-checked', 'true');
-		expect(getSwitch('Staking reward email notifications')).toHaveAttribute(
-			'aria-checked',
-			'false'
-		);
-		expect(getSwitch('Staking reward in-app notifications')).toHaveAttribute(
-			'aria-checked',
-			'true'
-		);
-		expect(getSwitch('Key deprecated in-app notifications')).toHaveAttribute(
-			'aria-checked',
-			'false'
-		);
 	});
 
-	it('fills in types the API omits instead of crashing', async () => {
-		renderPage(
-			vi.fn(
-				async () =>
-					({
-						price_alert: { email: true, inApp: false },
-					}) as unknown as NotificationPreferences
-			)
-		);
+	it('defaults wallets without saved preferences to all alerts enabled', async () => {
+		renderPage(vi.fn(async () => null));
 
-		await screen.findByText('Key deprecated');
-		expect(
-			getSwitch('Price alert triggered in-app notifications')
-		).toHaveAttribute('aria-checked', 'false');
-		expect(getSwitch('Key deprecated in-app notifications')).toHaveAttribute(
-			'aria-checked',
-			'true'
-		);
+		await screen.findByText('Settlement');
+		for (const type of NOTIFICATION_PREFERENCE_TYPES) {
+			expect(
+				getSwitch(NOTIFICATION_PREFERENCE_COPY[type].label)
+			).toHaveAttribute('aria-checked', 'true');
+		}
 	});
 
-	it('saves a single per-type, per-channel toggle and confirms with a toast', async () => {
+	it('submits all toggles and toasts only after the contract call succeeds', async () => {
 		const { updatePreferences } = renderPage();
-		await screen.findByText('Governance vote');
+		await screen.findByText('Settlement');
 
-		fireEvent.click(getSwitch('Governance vote email notifications'));
+		fireEvent.click(getSwitch('Settlement'));
+		fireEvent.click(getSwitch('Auto-invest'));
+		const saveButton = screen.getByRole('button', {
+			name: 'Save preferences',
+		});
+		expect(saveButton).toBeEnabled();
 
-		expect(getSwitch('Governance vote email notifications')).toHaveAttribute(
-			'aria-checked',
-			'true'
-		);
+		fireEvent.click(saveButton);
 		await waitFor(() =>
 			expect(toastSuccess).toHaveBeenCalledWith(SAVE_SUCCESS_COPY)
 		);
-
 		expect(updatePreferences).toHaveBeenCalledTimes(1);
-		const sent = updatePreferences.mock.calls[0][0];
-		expect(sent.governance_vote).toEqual({ email: true, inApp: false });
-		// Other rows are untouched.
-		expect(sent.price_alert).toEqual({ email: true, inApp: true });
-		expect(sent.staking_reward).toEqual({ email: false, inApp: true });
+		expect(updatePreferences.mock.calls[0][1]).toEqual({
+			settlement: false,
+			kyc_expiry: true,
+			watchlist_change: true,
+			auto_invest: false,
+			maturity_approaching: true,
+		} satisfies NotificationPreferences);
 	});
 
-	it('bulk toggle enables every type on both channels', async () => {
-		const { updatePreferences } = renderPage();
-		await screen.findByText('Governance vote');
-
-		const bulk = getSwitch('All notifications');
-		expect(bulk).toHaveAttribute('aria-checked', 'false');
-		fireEvent.click(bulk);
-
-		await waitFor(() => expect(toastSuccess).toHaveBeenCalled());
-		expect(updatePreferences).toHaveBeenLastCalledWith(
-			setAllNotificationPreferences(true)
-		);
-		expect(getSwitch('All notifications')).toHaveAttribute(
-			'aria-checked',
-			'true'
-		);
-		for (const sw of screen.getAllByRole('switch')) {
-			expect(sw).toHaveAttribute('aria-checked', 'true');
-		}
-	});
-
-	it('bulk toggle disables every type when all are enabled', async () => {
-		const { updatePreferences } = renderPage(
-			vi.fn(async () => setAllNotificationPreferences(true))
-		);
-		await screen.findByText('Governance vote');
-
-		const bulk = getSwitch('All notifications');
-		expect(bulk).toHaveAttribute('aria-checked', 'true');
-		fireEvent.click(bulk);
-
-		await waitFor(() => expect(toastSuccess).toHaveBeenCalled());
-		expect(updatePreferences).toHaveBeenLastCalledWith(
-			setAllNotificationPreferences(false)
-		);
-		for (const sw of screen.getAllByRole('switch')) {
-			expect(sw).toHaveAttribute('aria-checked', 'false');
-		}
-	});
-
-	it('rolls back a failed save, shows an error, and retries the same change', async () => {
+	it('keeps edits and shows an error when saving fails', async () => {
 		const updatePreferences = vi
-			.fn<
-				(next: NotificationPreferences) => Promise<NotificationPreferences>
-			>()
-			.mockRejectedValueOnce(new Error('Network error'))
-			.mockImplementation(async next => next);
+			.fn<() => Promise<void>>()
+			.mockRejectedValue(new Error('Transaction failed'));
 		renderPage(undefined, updatePreferences);
-		await screen.findByText('Vesting cliff');
+		await screen.findByText('Settlement');
 
-		fireEvent.click(getSwitch('Vesting cliff email notifications'));
+		fireEvent.click(getSwitch('KYC expiry'));
+		fireEvent.click(screen.getByRole('button', { name: 'Save preferences' }));
 
-		const alert = await screen.findByRole('alert');
-		expect(alert).toHaveTextContent(SAVE_ERROR_COPY);
+		expect(await screen.findByRole('alert')).toHaveTextContent(
+			SAVE_ERROR_COPY
+		);
 		expect(toastError).toHaveBeenCalledWith(SAVE_ERROR_COPY);
 		expect(toastSuccess).not.toHaveBeenCalled();
-		expect(getSwitch('Vesting cliff email notifications')).toHaveAttribute(
-			'aria-checked',
-			'false'
-		);
-
-		fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
-
-		await waitFor(() =>
-			expect(toastSuccess).toHaveBeenCalledWith(SAVE_SUCCESS_COPY)
-		);
-		expect(updatePreferences).toHaveBeenCalledTimes(2);
-		expect(updatePreferences.mock.calls[1][0].vesting_cliff).toEqual({
-			email: true,
-			inApp: false,
-		});
-		expect(getSwitch('Vesting cliff email notifications')).toHaveAttribute(
-			'aria-checked',
-			'true'
-		);
-		expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+		expect(getSwitch('KYC expiry')).toHaveAttribute('aria-checked', 'false');
 	});
 
 	it('shows a load error with a working retry', async () => {
 		const fetchPreferences = vi
-			.fn<() => Promise<NotificationPreferences>>()
-			.mockRejectedValueOnce(new Error('boom'))
-			.mockResolvedValue(makePreferences());
+			.fn<() => Promise<NotificationPreferences | null>>()
+			.mockRejectedValueOnce(new Error('RPC unavailable'))
+			.mockResolvedValue(getDefaultNotificationPreferences());
 		renderPage(fetchPreferences);
 
-		const alert = await screen.findByRole('alert');
-		expect(alert).toHaveTextContent(/couldn't load/i);
-
+		expect(await screen.findByRole('alert')).toHaveTextContent(
+			/couldn't load/i
+		);
 		fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
 
-		await screen.findByText('Price alert triggered');
+		await screen.findByText('Settlement');
 		expect(fetchPreferences).toHaveBeenCalledTimes(2);
 	});
 });
