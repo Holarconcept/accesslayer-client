@@ -1,0 +1,18 @@
+{
+  "default_branch": "dev",
+  "branches": [
+    "dev",
+    "fix/issue-1148-add-key-retirement-status-page-and-voluntary",
+    "origin"
+  ],
+  "parent": {
+    "dev": null,
+    "fix/issue-1148-add-key-retirement-status-page-and-voluntary": "dev",
+    "origin": "dev"
+  },
+  "order": [
+    "dev",
+    "fix/issue-1148-add-key-retirement-status-page-and-voluntary",
+    "origin"
+  ]
+}
