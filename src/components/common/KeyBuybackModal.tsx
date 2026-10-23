@@ -186,7 +186,10 @@ export default function KeyBuybackModal({
 
 							<div className="flex items-center justify-between">
 								<span className="text-white/60">Total XLM Payout</span>
-								<span className="font-bold text-emerald-400 tabular-nums text-base">
+								<span
+									className="font-bold text-emerald-400 tabular-nums text-base"
+									data-testid="buyback-amount-received"
+								>
 									{formatNumber(
 										receipt.totalPayoutStroops / STROOPS_PER_XLM,
 										{

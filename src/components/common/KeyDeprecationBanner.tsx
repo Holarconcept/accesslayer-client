@@ -58,6 +58,7 @@ export default function KeyDeprecationBanner({
 		: 'Guaranteed open window';
 
 	const hasHoldings = holdingsCount > 0;
+	const showBuybackConfirmed = Boolean(recentSettlement);
 	const estimatedValueXlm =
 		(holdingsCount * buybackPriceStroops) / STROOPS_PER_XLM;
 
@@ -75,7 +76,7 @@ export default function KeyDeprecationBanner({
 					<div className="flex flex-wrap items-center gap-2.5">
 						<span className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/20 px-2.5 py-0.5 text-xs font-semibold text-amber-300">
 							<AlertTriangle className="size-3.5" aria-hidden="true" />
-							<span>Key Deprecated</span>
+							<span>{showBuybackConfirmed ? 'Buyback Confirmed' : 'Key Deprecated'}</span>
 						</span>
 						<span className="text-xs font-medium text-amber-200/70">
 							Guaranteed Contract Buyback Active

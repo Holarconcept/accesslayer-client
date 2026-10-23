@@ -3,6 +3,10 @@
  * Shows estimated gross proceeds and, when the key is still within its
  * 7-day launch window, the launch penalty deducted and the resulting net
  * proceeds (#825).
+ *
+ * Note: the retirement banner, voluntary exit panel, notice period progress
+ * bar, Buyback Confirmed page, and holder notification card described in the
+ * issue are not part of this component and are not implemented here.
  */
 
 import { formatDisplayKeyPrice } from '@/utils/keyPriceDisplay.utils';

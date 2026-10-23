@@ -58,7 +58,7 @@ export const LockupCountdown: React.FC<LockupCountdownProps> = ({
 			data-testid="lockup-countdown"
 			aria-label={`Lockup remaining: ${formattedTime}`}
 		>
-			<Clock className="size-3.5 shrink-0 text-amber-400 animate-pulse" />
+			<Clock className="size-3.5 shrink-0 text-amber-400 animate-pulse" aria-hidden="true" />
 			<span className="font-mono tabular-nums" data-testid="lockup-timer-text">
 				{formattedTime}
 			</span>

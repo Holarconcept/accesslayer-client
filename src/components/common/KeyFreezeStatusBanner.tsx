@@ -32,6 +32,16 @@ function formatExpiry(iso: string, expiresAtMs: number | null): string {
 	});
 }
 
+/**
+ * Retirement banner text summary helper.
+ */
+export function formatRetirementCountdown(endsAtMs: number, nowMs: number): string {
+	const remaining = Math.max(0, endsAtMs - nowMs);
+	const days = Math.floor(remaining / 86_400_000);
+	const hours = Math.floor((remaining % 86_400_000) / 3_600_000);
+	return `${days}d ${hours}h remaining`;
+}
+
 export default function KeyFreezeStatusBanner({
 	freeze,
 	className,
