@@ -17,10 +17,6 @@ interface KeyFreezeStatusBannerProps {
 	className?: string;
 }
 
-/** Admin contact link shown in the banner when a freeze needs escalation. */
-export const FREEZE_SUPPORT_URL =
-	'https://github.com/accesslayerorg/accesslayer-client/issues';
-
 function formatExpiry(iso: string, expiresAtMs: number | null): string {
 	if (expiresAtMs === null) return iso;
 	return new Date(expiresAtMs).toLocaleString(undefined, {
@@ -30,16 +26,6 @@ function formatExpiry(iso: string, expiresAtMs: number | null): string {
 		hour: '2-digit',
 		minute: '2-digit',
 	});
-}
-
-/**
- * Retirement banner text summary helper.
- */
-export function formatRetirementCountdown(endsAtMs: number, nowMs: number): string {
-	const remaining = Math.max(0, endsAtMs - nowMs);
-	const days = Math.floor(remaining / 86_400_000);
-	const hours = Math.floor((remaining % 86_400_000) / 3_600_000);
-	return `${days}d ${hours}h remaining`;
 }
 
 export default function KeyFreezeStatusBanner({
@@ -95,7 +81,7 @@ export default function KeyFreezeStatusBanner({
 				<p className="mt-1 text-sm text-white/70">
 					Buying and selling are disabled until the freeze is lifted.{' '}
 					<a
-						href={FREEZE_SUPPORT_URL}
+						href="https://github.com/accesslayerorg/accesslayer-client/issues"
 						target="_blank"
 						rel="noreferrer"
 						data-testid="key-freeze-contact-link"
